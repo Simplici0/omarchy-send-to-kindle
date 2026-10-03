@@ -74,6 +74,7 @@ Panel {
   }
 
   function close() {
+    flushPendingFields()
     root.controller.hide()
   }
 
@@ -99,13 +100,43 @@ Panel {
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
-  function saveField(key, value) {
-    var values = {}
-    values[key] = value
-    persistSettings(values)
+  // Settings commit: while Settings is open, the field text is the live
+  // truth. Persisting is debounced off typing, not focus loss — a click on a
+  // button never blurs a text field, so waiting for editingFinished alone can
+  // leave the persisted snapshot (and any gate reading it) stuck stale.
+  function commitFields() {
+    persistSettings({
+      toEmail: toField.text.trim(),
+      fromEmail: fromField.text.trim(),
+      smtpHost: hostField.text.trim(),
+      smtpPort: Number(portField.text) || 587,
+      smtpUser: userField.text.trim()
+    })
+  }
+
+  // The commit timer's running state doubles as the dirty flag: there is
+  // nothing to flush unless the user typed since the last commit.
+  function flushPendingFields() {
+    if (!settingsCommit.running) return
+    settingsCommit.stop()
+    commitFields()
+  }
+
+  function onSettingsFieldEdited() {
+    if (!root.showSettings) return
+    settingsCommit.restart()
+  }
+
+  // The key inputs also re-check the keyring once they settle.
+  function onKeyFieldEdited() {
+    if (!root.showSettings) return
+    settingsCommit.restart()
+    secretRecheck.restart()
   }
 
   function refreshSettingsFields() {
+    if (toField.activeFocus || fromField.activeFocus || hostField.activeFocus
+        || portField.activeFocus || userField.activeFocus) return
     toField.text = root.toEmail
     fromField.text = root.fromEmail
     hostField.text = root.smtpHost
@@ -115,20 +146,31 @@ Panel {
 
   function openSettings() {
     refreshSettingsFields()
+    if (root.smtpUser === "" || root.smtpHost === "") root.showAdvanced = true
     root.showSettings = true
-    if (root.smtpUser !== "" && root.smtpHost !== "") {
-      root.verifySecret()
-    } else {
-      root.secretState = "unknown"
-    }
+    root.verifySecret()
   }
 
   function closeSettings() {
+    flushPendingFields()
     root.showSettings = false
+    // The focused field turns invisible with the view; hand focus back to the
+    // key catcher so Escape/Send keep working without reopening the panel.
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  // Live values while Settings is open, persisted values otherwise.
+  function effectiveSmtpUser() {
+    return root.showSettings ? userField.text.trim() : root.smtpUser
+  }
+
+  function effectiveSmtpHost() {
+    return root.showSettings ? hostField.text.trim() : root.smtpHost
   }
 
   function storeSecretCommand() {
-    return "secret-tool store --label 'Omarchy Send to Kindle' smtp " + root.smtpUser + "@" + root.smtpHost
+    return "secret-tool store --label 'Omarchy Send to Kindle' smtp "
+      + effectiveSmtpUser() + "@" + effectiveSmtpHost()
   }
 
   function copyToClipboard(value) {
@@ -139,8 +181,9 @@ Panel {
   // Verify keyring presence via the helper (prints OK/MISSING, exit 0).
   // The secret itself never enters QML, stdout text, or logs.
   function verifySecret() {
+    flushPendingFields()
     if (root.smtpUser === "" || root.smtpHost === "") {
-      root.secretState = "missing"
+      root.secretState = "unconfigured"
       return
     }
     secretProc.command = [
@@ -184,6 +227,7 @@ Panel {
 
   function send() {
     if (sendProc.running) return
+    flushPendingFields()
     var cfg = {
       smtpHost: root.smtpHost,
       smtpPort: root.smtpPort,
@@ -238,8 +282,12 @@ Panel {
       return "SMTP secret not in keyring. Open Settings to fix it."
     if (line.startsWith("ERROR smtp-auth"))
       return "SMTP rejected the credentials. Check the app-password, then retry."
-    if (line.startsWith("ERROR smtp-error"))
+    if (line.startsWith("ERROR smtp-error")) {
+      var detail = line.slice("ERROR smtp-error".length).trim()
+      if (/timed out|unexpectedly closed|refused/i.test(detail))
+        return "Could not reach the mail server — this network appears to block SMTP. Try another network."
       return "Mail server error. Check network and Settings, then retry."
+    }
     if (line.startsWith("ERROR too-large"))
       return Model.errorMessage("too-large")
     if (line.startsWith("ERROR unsupported-type"))
@@ -327,13 +375,30 @@ Panel {
       waitForEnd: true
       onStreamFinished: {
         var line = String(text).trim()
-        root.secretState = line === "OK" ? "saved" : "missing"
+        if (line === "OK") root.secretState = "saved"
+        else root.secretState = (root.smtpUser === "" || root.smtpHost === "") ? "unconfigured" : "missing"
       }
     }
     onExited: function(exitCode) {
       if (exitCode !== 0 && root.secretState === "checking")
-        root.secretState = "missing"
+        root.secretState = (root.smtpUser === "" || root.smtpHost === "") ? "unconfigured" : "missing"
     }
+  }
+
+  // Debounced settings persistence while typing in Settings.
+  Timer {
+    id: settingsCommit
+    interval: 400
+    repeat: false
+    onTriggered: root.commitFields()
+  }
+
+  // Re-check the keyring once the key inputs settle.
+  Timer {
+    id: secretRecheck
+    interval: 600
+    repeat: false
+    onTriggered: root.verifySecret()
   }
 
   // Safety net: a wedged SMTP handshake must not pin the panel on "Sending…".
@@ -346,15 +411,6 @@ Panel {
       root.sendState = Model.STATUS_ERROR
       root.statusText = "Timed out waiting for the mail server. Check network and retry."
     }
-  }
-
-  IpcHandler {
-    target: root.ipcTarget
-    function open(): void { root.open() }
-    function close(): void { root.close() }
-    function show(): void { root.open() }
-    function hide(): void { root.close() }
-    function toggle(): void { root.toggle() }
   }
 
   KeyboardPanel {
@@ -599,7 +655,8 @@ Panel {
                 placeholderText: "you@kindle.com"
                 font.family: root.contentFontFamily
                 foreground: root.contentForeground
-                onEditingFinished: root.saveField("toEmail", text.trim())
+                onTextChanged: root.onSettingsFieldEdited()
+                Keys.onEscapePressed: root.closeSettings()
               }
               Text {
                 textFormat: Text.PlainText
@@ -626,13 +683,16 @@ Panel {
                 text: root.secretState === "saved" ? "Saved in keyring"
                   : root.secretState === "missing" ? "Not saved"
                   : root.secretState === "checking" ? "Checking…"
+                  : root.secretState === "unconfigured" ? "Not configured yet"
                   : "Not checked"
-                color: root.secretState === "missing" ? Color.urgent : root.contentForeground
+                color: root.secretState === "missing" ? Color.urgent
+                  : root.secretState === "saved" ? root.contentForeground
+                  : root.dimmed
                 font.family: root.contentFontFamily
                 font.pixelSize: Style.font.body
               }
               Text {
-                visible: root.smtpUser === "" || root.smtpHost === ""
+                visible: root.effectiveSmtpUser() === "" || root.effectiveSmtpHost() === ""
                 textFormat: Text.PlainText
                 width: parent.width
                 text: "Set SMTP user and host in Advanced first — the key is user@host."
@@ -642,7 +702,7 @@ Panel {
                 wrapMode: Text.WordWrap
               }
               Text {
-                visible: root.smtpUser !== "" && root.smtpHost !== ""
+                visible: root.effectiveSmtpUser() !== "" && root.effectiveSmtpHost() !== ""
                 textFormat: Text.PlainText
                 width: parent.width
                 text: root.storeSecretCommand()
@@ -658,13 +718,12 @@ Panel {
                 Button {
                   text: "Verify"
                   focusable: true
-                  enabled: root.secretState !== "checking" && root.smtpUser !== "" && root.smtpHost !== ""
+                  enabled: root.secretState !== "checking"
                   onClicked: root.verifySecret()
                 }
                 Button {
                   text: "Copy setup command"
                   focusable: true
-                  enabled: root.smtpUser !== "" && root.smtpHost !== ""
                   onClicked: root.copyToClipboard(root.storeSecretCommand())
                 }
               }
@@ -715,7 +774,8 @@ Panel {
                   placeholderText: "Approved sender email"
                   font.family: root.contentFontFamily
                   foreground: root.contentForeground
-                  onEditingFinished: root.saveField("fromEmail", text.trim())
+                  onTextChanged: root.onSettingsFieldEdited()
+                  Keys.onEscapePressed: root.closeSettings()
                 }
                 Row {
                   width: parent.width
@@ -727,7 +787,8 @@ Panel {
                     placeholderText: "smtp.gmail.com"
                     font.family: root.contentFontFamily
                     foreground: root.contentForeground
-                    onEditingFinished: root.saveField("smtpHost", text.trim())
+                    onTextChanged: root.onKeyFieldEdited()
+                    Keys.onEscapePressed: root.closeSettings()
                   }
                   TextField {
                     id: portField
@@ -736,7 +797,8 @@ Panel {
                     inputMethodHints: Qt.ImhDigitsOnly
                     font.family: root.contentFontFamily
                     foreground: root.contentForeground
-                    onEditingFinished: root.saveField("smtpPort", Number(text) || 587)
+                    onTextChanged: root.onSettingsFieldEdited()
+                    Keys.onEscapePressed: root.closeSettings()
                   }
                 }
                 TextField {
@@ -745,7 +807,8 @@ Panel {
                   placeholderText: "SMTP username"
                   font.family: root.contentFontFamily
                   foreground: root.contentForeground
-                  onEditingFinished: root.saveField("smtpUser", text.trim())
+                  onTextChanged: root.onKeyFieldEdited()
+                  Keys.onEscapePressed: root.closeSettings()
                 }
               }
 
