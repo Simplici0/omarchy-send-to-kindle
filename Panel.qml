@@ -61,6 +61,10 @@ Panel {
   // ---- keyring secret presence (boolean only, never the secret)
   property string secretState: "unknown"
 
+  // True when the send timeout fired: the process was killed and its exit
+  // must not overwrite the timeout message with a generic failure.
+  property bool sendTimedOut: false
+
   readonly property string scriptPath:
     Qt.resolvedUrl("helpers/send_kindle.py").toString().replace(/^file:\/\//, "")
 
@@ -228,6 +232,7 @@ Panel {
   function send() {
     if (sendProc.running) return
     flushPendingFields()
+    root.sendTimedOut = false
     var cfg = {
       smtpHost: root.smtpHost,
       smtpPort: root.smtpPort,
@@ -266,6 +271,7 @@ Panel {
 
   function finishSend(exitCode, output) {
     sendTimeout.stop()
+    if (root.sendTimedOut) return
     var line = String(output || "").trim()
     if (exitCode === 0 && line.startsWith("OK")) {
       root.sendState = Model.STATUS_SENT
@@ -408,6 +414,8 @@ Panel {
     repeat: false
     onTriggered: {
       if (!root.sending) return
+      root.sendTimedOut = true
+      sendProc.running = false
       root.sendState = Model.STATUS_ERROR
       root.statusText = "Timed out waiting for the mail server. Check network and retry."
     }

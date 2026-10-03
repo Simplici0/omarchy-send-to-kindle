@@ -15,6 +15,7 @@ import argparse
 import mimetypes
 import os
 import smtplib
+import ssl
 import subprocess
 import sys
 from email.message import EmailMessage
@@ -70,6 +71,7 @@ def main(argv=None):
     except SystemExit as exc:
         # argparse already printed usage to stderr; mirror a machine line.
         print("ERROR bad-args", flush=True)
+        return 2
     if args.check_secret:
         if not args.smtp_user or not args.smtp_host:
             print("ERROR bad-args", flush=True)
@@ -123,15 +125,19 @@ def main(argv=None):
     msg.set_content("Sent from the Omarchy Send to Kindle plugin.")
     msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=path.name)
 
+    # Verify the server certificate: smtplib's implicit context is
+    # _create_unverified_context (CERT_NONE, no hostname check), which would
+    # let an on-path attacker terminate TLS and capture the app-password.
+    context = ssl.create_default_context()
     try:
         if args.smtp_port == 465:
-            with smtplib.SMTP_SSL(args.smtp_host, args.smtp_port, timeout=30) as smtp:
+            with smtplib.SMTP_SSL(args.smtp_host, args.smtp_port, timeout=30, context=context) as smtp:
                 smtp.login(args.smtp_user, secret)
                 smtp.send_message(msg)
         else:
             with smtplib.SMTP(args.smtp_host, args.smtp_port, timeout=30) as smtp:
                 if not args.no_tls:
-                    smtp.starttls()
+                    smtp.starttls(context=context)
                 smtp.login(args.smtp_user, secret)
                 smtp.send_message(msg)
     except smtplib.SMTPAuthenticationError as exc:
