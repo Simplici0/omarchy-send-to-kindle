@@ -9,7 +9,7 @@ Usage (invoked by Panel.qml, not by hand):
         --from A --to B --file PATH [--no-tls] [--subject S]
 
 Prints `OK <detail>` or `ERROR <code> [detail]` on stdout; exit 0/1/2.
-Exit 2 = usage/validation error, 1 = send/auth failure, 0 = success.
+Exit 2 = bad arguments, 1 = validation/send/auth failure, 0 = success.
 """
 import argparse
 import mimetypes

@@ -16,23 +16,27 @@ Or copy this folder to `~/.config/omarchy/plugins/<your-id>/` and enable it:
 omarchy plugin enable <your-id>
 ```
 
-Requires: `python3` (stdlib only), `secret-tool` (`libsecret` +
-`gnome-keyring-daemon`, preinstalled on Omarchy/Arch).
+Requires: `python3` (stdlib only), `zenity` (native file picker),
+`secret-tool` (`libsecret` + `gnome-keyring-daemon`, preinstalled on
+Omarchy/Arch).
 
 ## Use
 
 1. Click **Kindle** in the bar (or `omarchy-shell shell summon <id> '{}'`).
-2. Paste the file path, press **Pick**. EPUB or PDF, up to 50 MB
-   (Amazon's per-email limit). Name, format and size are shown.
-3. Fill SMTP host/port/user, sender, and destination once — they persist
-   in the widget's inline `shell.json` entry.
+2. Click **Choose file** and pick an EPUB or PDF (zenity, the native
+   system dialog; up to 50 MB — Amazon's per-email limit). Name, format
+   and size are shown.
+3. Open Settings (⚙): set the Kindle email, then **Show advanced** for
+   sender, SMTP host/port and username. Fields save as you type into the
+   widget's inline `shell.json` entry.
 4. Press **Send to Kindle**. States: ready → sending → sent / error.
    `Escape` closes the panel.
 
-`FileDialog` is deliberately not used: no built-in layer-shell panel uses
-`QtQuick.Dialogs`, so path-paste + `Model.js` validation + `stat` sizing
-is the predictable path. The `Convert to Kindle format` toggle sets the
-mail subject to `convert` (Amazon converts EPUB to Kindle format).
+The picker is `zenity` (a normal system toplevel) rather than
+`QtQuick.Dialogs`: no built-in layer-shell panel uses `FileDialog`, and
+the panel closes before the dialog opens so the dialog owns input. The
+`Convert to Kindle format` toggle sets the mail subject to `convert`
+(Amazon converts EPUB to Kindle format).
 
 ## Configure
 

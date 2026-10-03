@@ -317,6 +317,7 @@ Panel {
       onStreamFinished: {
         var picked = String(text).trim()
         if (picked !== "") root.pickFile(picked)
+        root.open()
       }
     }
   }
@@ -408,9 +409,11 @@ Panel {
   }
 
   // Safety net: a wedged SMTP handshake must not pin the panel on "Sending…".
+  // 50 MB over a slow uplink can take minutes, so this only catches a stall,
+  // it is not a transfer deadline.
   Timer {
     id: sendTimeout
-    interval: 60000
+    interval: 300000
     repeat: false
     onTriggered: {
       if (!root.sending) return
@@ -538,7 +541,12 @@ Panel {
                     anchors.horizontalCenter: parent.horizontalCenter
                     enabled: !root.sending && !chooseProc.running
                     onClicked: {
-                      if (!chooseProc.running) chooseProc.running = true
+                      if (chooseProc.running) return
+                      // zenity is a normal toplevel below the panel's
+                      // layer-shell overlay, so leave the panel before
+                      // launching it (same as the shell before external GUI).
+                      root.close()
+                      chooseProc.running = true
                     }
                   }
 
