@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "local.send-to-kindle",
+  "name": "Send to Kindle",
+  "version": "0.1.0",
+  "author": "simplici",
+  "description": "Send EPUB/PDF files to a Kindle address via SMTP (Amazon Send to Kindle by email)",
+  "license": "MIT",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Send to Kindle",
+    "description": "Send EPUB/PDF files to a Kindle address via SMTP",
+    "category": "Apps",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
