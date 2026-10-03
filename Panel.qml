@@ -115,8 +115,12 @@ Panel {
 
   function openSettings() {
     refreshSettingsFields()
-    root.secretState = "unknown"
     root.showSettings = true
+    if (root.smtpUser !== "" && root.smtpHost !== "") {
+      root.verifySecret()
+    } else {
+      root.secretState = "unknown"
+    }
   }
 
   function closeSettings() {
@@ -628,6 +632,17 @@ Panel {
                 font.pixelSize: Style.font.body
               }
               Text {
+                visible: root.smtpUser === "" || root.smtpHost === ""
+                textFormat: Text.PlainText
+                width: parent.width
+                text: "Set SMTP user and host in Advanced first — the key is user@host."
+                color: Color.urgent
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+              Text {
+                visible: root.smtpUser !== "" && root.smtpHost !== ""
                 textFormat: Text.PlainText
                 width: parent.width
                 text: root.storeSecretCommand()
@@ -643,12 +658,13 @@ Panel {
                 Button {
                   text: "Verify"
                   focusable: true
-                  enabled: root.secretState !== "checking"
+                  enabled: root.secretState !== "checking" && root.smtpUser !== "" && root.smtpHost !== ""
                   onClicked: root.verifySecret()
                 }
                 Button {
                   text: "Copy setup command"
                   focusable: true
+                  enabled: root.smtpUser !== "" && root.smtpHost !== ""
                   onClicked: root.copyToClipboard(root.storeSecretCommand())
                 }
               }
