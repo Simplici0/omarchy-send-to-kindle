@@ -50,15 +50,17 @@ def lookup_secret(user, host):
 
 def build_args(argv):
     parser = argparse.ArgumentParser(description="Send EPUB/PDF to Kindle via SMTP")
-    parser.add_argument("--smtp-host", required=True)
-    parser.add_argument("--smtp-port", required=True, type=int)
-    parser.add_argument("--smtp-user", required=True)
-    parser.add_argument("--from", dest="from_addr", required=True)
-    parser.add_argument("--to", required=True)
-    parser.add_argument("--file", dest="file_path", required=True)
+    parser.add_argument("--smtp-host", required=False, default="")
+    parser.add_argument("--smtp-port", required=False, default=587, type=int)
+    parser.add_argument("--smtp-user", required=False, default="")
+    parser.add_argument("--from", dest="from_addr", required=False, default="")
+    parser.add_argument("--to", required=False, default="")
+    parser.add_argument("--file", dest="file_path", required=False, default="")
     parser.add_argument("--no-tls", action="store_true",
                         help="Skip STARTTLS (local relay without TLS only)")
     parser.add_argument("--subject", default="convert")
+    parser.add_argument("--check-secret", action="store_true",
+                        help="Only verify the keyring secret exists (prints OK or MISSING, never the secret)")
     return parser.parse_args(argv)
 
 
@@ -68,7 +70,17 @@ def main(argv=None):
     except SystemExit as exc:
         # argparse already printed usage to stderr; mirror a machine line.
         print("ERROR bad-args", flush=True)
-        return 2
+    if args.check_secret:
+        if not args.smtp_user or not args.smtp_host:
+            print("ERROR bad-args", flush=True)
+            return 2
+        print("OK" if lookup_secret(args.smtp_user, args.smtp_host) is not None else "MISSING", flush=True)
+        return 0
+
+    for required in ("smtp_host", "smtp_user", "from_addr", "to", "file_path"):
+        if not getattr(args, required):
+            print("ERROR bad-args", flush=True)
+            return 2
 
     addr = args.to.strip().lower()
     if not (addr.endswith("@kindle.com") or addr.endswith("@free.kindle.com")):
