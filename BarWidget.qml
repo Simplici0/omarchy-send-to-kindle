@@ -65,11 +65,11 @@ BarWidget {
     function toggle(): void { root.togglePanel() }
   }
 
-  WidgetButton {
+  BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "Kindle"
+    text: "\uDB80\uDCBD"
     tooltipText: "Send to Kindle"
 
     onPressed: function(b) {
