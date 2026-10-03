@@ -65,6 +65,9 @@ Panel {
   // must not overwrite the timeout message with a generic failure.
   property bool sendTimedOut: false
 
+  // Last keyring-store note shown under the secret row (never the secret).
+  property string secretNote: ""
+
   readonly property string scriptPath:
     Qt.resolvedUrl("helpers/send_kindle.py").toString().replace(/^file:\/\//, "")
 
@@ -172,14 +175,20 @@ Panel {
     return root.showSettings ? hostField.text.trim() : root.smtpHost
   }
 
-  function storeSecretCommand() {
-    return "secret-tool store --label 'Omarchy Send to Kindle' smtp "
-      + effectiveSmtpUser() + "@" + effectiveSmtpHost()
-  }
-
-  function copyToClipboard(value) {
-    if (!value || !root.bar) return
-    Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(value) + " | wl-copy"])
+  // Store the pasted app-password in the keyring: the secret travels to the
+  // helper over stdin (never argv), matching the shell's own credential flow.
+  function storeSecret() {
+    if (storeSecretProc.running) return
+    flushPendingFields()
+    if (root.smtpUser === "" || root.smtpHost === "" || secretField.text === "") return
+    root.secretNote = ""
+    storeSecretProc.command = [
+      "python3", root.scriptPath,
+      "--store-secret",
+      "--smtp-user", root.smtpUser,
+      "--smtp-host", root.smtpHost
+    ]
+    storeSecretProc.running = true
   }
 
   // Verify keyring presence via the helper (prints OK/MISSING, exit 0).
@@ -392,6 +401,35 @@ Panel {
     }
   }
 
+  // Stores the pasted secret: it is written once to the helper's stdin and the
+  // field is cleared in the same breath, so it is not kept in QML.
+  Process {
+    id: storeSecretProc
+    stdinEnabled: true
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var line = String(text).trim()
+        if (line === "OK stored") {
+          root.secretNote = ""
+          root.verifySecret()
+        } else {
+          root.secretNote = line.startsWith("ERROR empty-secret")
+            ? "Enter the app-password first."
+            : "Could not save to the keyring."
+        }
+      }
+    }
+    onStarted: {
+      write(secretField.text.trim() + "\n")
+      secretField.text = ""
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0 && root.secretNote === "")
+        root.secretNote = "Could not save to the keyring."
+    }
+  }
+
   // Debounced settings persistence while typing in Settings.
   Timer {
     id: settingsCommit
@@ -440,7 +478,7 @@ Panel {
       anchors.fill: parent
       blocked: root.showSettings && (
         toField.activeFocus || fromField.activeFocus || hostField.activeFocus
-        || portField.activeFocus || userField.activeFocus)
+        || portField.activeFocus || userField.activeFocus || secretField.activeFocus)
       onCloseRequested: {
         if (root.showSettings) root.closeSettings()
         else root.close()
@@ -717,31 +755,46 @@ Panel {
                 font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap
               }
-              Text {
-                visible: root.effectiveSmtpUser() !== "" && root.effectiveSmtpHost() !== ""
-                textFormat: Text.PlainText
-                width: parent.width
-                text: root.storeSecretCommand()
-                color: root.dimmed
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.Wrap
-              }
               Row {
                 width: parent.width
                 spacing: Style.spacing.controlGap
 
-                Button {
-                  text: "Verify"
-                  focusable: true
-                  enabled: root.secretState !== "checking"
-                  onClicked: root.verifySecret()
+                TextField {
+                  id: secretField
+                  width: parent.width - saveSecretButton.width - parent.spacing
+                  password: true
+                  placeholderText: "App-password"
+                  font.family: root.contentFontFamily
+                  foreground: root.contentForeground
+                  enabled: !storeSecretProc.running
+                  Keys.onEscapePressed: root.closeSettings()
+                  onAccepted: root.storeSecret()
                 }
                 Button {
-                  text: "Copy setup command"
+                  id: saveSecretButton
+                  text: storeSecretProc.running ? "Saving…" : "Save"
                   focusable: true
-                  onClicked: root.copyToClipboard(root.storeSecretCommand())
+                  enabled: !storeSecretProc.running && root.effectiveSmtpUser() !== ""
+                    && root.effectiveSmtpHost() !== "" && secretField.text !== ""
+                  onClicked: root.storeSecret()
                 }
+              }
+              Text {
+                visible: root.secretNote !== ""
+                textFormat: Text.PlainText
+                width: parent.width
+                text: root.secretNote
+                color: Color.urgent
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+              Button {
+                width: parent.width
+                text: "Verify"
+                focusable: true
+                enabled: root.secretState !== "checking"
+                onClicked: root.verifySecret()
               }
 
               PanelSeparator { width: parent.width; foreground: root.contentForeground }

@@ -44,17 +44,20 @@ Non-secret settings (host, port, user, sender, destination) are edited in
 the panel and stored via `persistSettings` in `shell.json`. Nothing secret
 is ever stored there, in QML, or in `manifest.json`.
 
-The SMTP secret (password / app-password) lives in gnome-keyring. Store it
-once — the panel shows this exact command:
+The SMTP secret (password / app-password) lives in gnome-keyring. Paste it
+into **Settings → Secret (keyring)** and press **Save**: it reaches the
+helper over stdin (never argv), the field is cleared right away, and
+**Verify** confirms it is stored. The terminal equivalent, if you prefer:
 
 ```sh
 secret-tool store --label 'Omarchy Send to Kindle' smtp <user>@<host>
 ```
 
-The helper reads it back itself via `secret-tool lookup`; it never travels
-on argv or through QML. If it is missing you get `auth-missing` with the
-command to run. If the mail server rejects it you get an actionable
-SMTP error, never a stuck panel (60 s timeout rearms to error).
+The helper reads the secret back itself via `secret-tool lookup`; it is
+never stored in `shell.json`, QML state, argv, or logs. If it is missing
+you get `auth-missing`; if the mail server rejects it you get an
+actionable SMTP error, never a stuck panel (5 min stall timeout rearms to
+error).
 
 Gmail/Outlook note: plain passwords are usually rejected — create an
 **app password** in your provider and store that. OAuth2 is out of scope

@@ -7,6 +7,8 @@ gnome-keyring). The secret NEVER travels on argv or through QML.
 Usage (invoked by Panel.qml, not by hand):
     send_kindle.py --smtp-host H --smtp-port P --smtp-user U \
         --from A --to B --file PATH [--no-tls] [--subject S]
+    send_kindle.py --check-secret --smtp-user U --smtp-host H
+    send_kindle.py --store-secret --smtp-user U --smtp-host H   # secret on stdin
 
 Prints `OK <detail>` or `ERROR <code> [detail]` on stdout; exit 0/1/2.
 Exit 2 = bad arguments, 1 = validation/send/auth failure, 0 = success.
@@ -62,6 +64,8 @@ def build_args(argv):
     parser.add_argument("--subject", default="convert")
     parser.add_argument("--check-secret", action="store_true",
                         help="Only verify the keyring secret exists (prints OK or MISSING, never the secret)")
+    parser.add_argument("--store-secret", action="store_true",
+                        help="Read the secret from stdin and store it in the keyring (never printed, never in argv)")
     return parser.parse_args(argv)
 
 
@@ -77,6 +81,34 @@ def main(argv=None):
             print("ERROR bad-args", flush=True)
             return 2
         print("OK" if lookup_secret(args.smtp_user, args.smtp_host) is not None else "MISSING", flush=True)
+        return 0
+
+    if args.store_secret:
+        if not args.smtp_user or not args.smtp_host:
+            print("ERROR bad-args", flush=True)
+            return 2
+        # The secret arrives on stdin (piped by the panel), never on argv, and
+        # is forwarded to secret-tool's stdin without ever being printed.
+        secret = (sys.stdin.readline() or "").rstrip("\n")
+        if secret == "":
+            print("ERROR empty-secret", flush=True)
+            return 1
+        key = args.smtp_user + "@" + args.smtp_host
+        try:
+            proc = subprocess.run(
+                ["secret-tool", "store", "--label", "Omarchy Send to Kindle", "smtp", key],
+                input=secret + "\n",
+                text=True,
+                capture_output=True,
+                timeout=15,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            print("ERROR store-failed", flush=True)
+            return 1
+        if proc.returncode != 0:
+            print("ERROR store-failed", flush=True)
+            return 1
+        print("OK stored", flush=True)
         return 0
 
     for required in ("smtp_host", "smtp_user", "from_addr", "to", "file_path"):
