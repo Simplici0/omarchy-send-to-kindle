@@ -1,5 +1,7 @@
 # Send to Kindle
 
+![Send to Kindle preview](preview.png)
+
 Bar widget for Omarchy Quattro that sends EPUB/PDF files to a `@kindle.com`
 address using Amazon's [Send to Kindle by email](https://www.amazon.com/sendtokindle)
 over your own SMTP provider. No Calibre, no Docker, no daemons.
