@@ -14,8 +14,7 @@ import "Model.js" as Model
 // Non-secret config persists in the widget's inline shell.json entry.
 Panel {
   id: root
-  moduleName: "local.send-to-kindle"
-  ipcTarget: "local.send-to-kindle"
+  moduleName: "io.github.simplici0.send-to-kindle"
   manageIpc: false
 
   property var anchorItem: null
@@ -69,7 +68,7 @@ Panel {
   property string secretNote: ""
 
   readonly property string scriptPath:
-    Qt.resolvedUrl("helpers/send_kindle.py").toString().replace(/^file:\/\//, "")
+    decodeURIComponent(Qt.resolvedUrl("helpers/send_kindle.py").toString().replace(/^file:\/\//, ""))
 
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
@@ -311,23 +310,38 @@ Panel {
       return "File not found. Choose it again."
     if (line.startsWith("ERROR bad-to"))
       return Model.errorMessage("bad-to")
+    if (line.startsWith("ERROR bad-args"))
+      return "Invalid settings. Remove line breaks from the email fields, then retry."
+    if (line.startsWith("ERROR unreadable"))
+      return "Could not read the file. Check its permissions, then retry."
+    if (line.startsWith("ERROR internal"))
+      return "Send failed unexpectedly. Check Settings, then retry."
     if (line !== "") return line
     return "Send failed with no message."
   }
 
-  // Native file picker (zenity, preinstalled): prints the chosen path on
-  // stdout. Output is a path only — never a secret.
+  // System file picker (`omarchy file select`, the XDG Desktop Portal
+  // chooser), run out-of-process: exit 0 prints the absolute path on stdout,
+  // 1 means the user cancelled, 2 means the chooser itself failed. The secret
+  // never passes through here; stdout is a path only.
   Process {
     id: chooseProc
-    command: ["zenity", "--file-selection", "--title=Choose an EPUB or PDF",
-      "--file-filter=eBooks (*.epub *.pdf)"]
+    command: ["omarchy", "file", "select",
+      "--title", "Choose an EPUB or PDF",
+      "--extensions", "epub pdf"]
     stdout: StdioCollector {
+      id: chooseStdout
       waitForEnd: true
-      onStreamFinished: {
-        var picked = String(text).trim()
-        if (picked !== "") root.pickFile(picked)
-        root.open()
+    }
+    onExited: function(exitCode) {
+      var picked = String(chooseStdout.text).trim()
+      if (exitCode === 0 && picked !== "") {
+        root.pickFile(picked)
+      } else if (exitCode !== 1) {
+        root.sendState = Model.STATUS_ERROR
+        root.statusText = "Could not open the system file chooser. Check that xdg-desktop-portal is running."
       }
+      root.open()
     }
   }
 
@@ -580,7 +594,7 @@ Panel {
                     enabled: !root.sending && !chooseProc.running
                     onClicked: {
                       if (chooseProc.running) return
-                      // zenity is a normal toplevel below the panel's
+                      // The chooser is a normal toplevel below the panel's
                       // layer-shell overlay, so leave the panel before
                       // launching it (same as the shell before external GUI).
                       root.close()

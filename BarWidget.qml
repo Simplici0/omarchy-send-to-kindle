@@ -7,7 +7,7 @@ import qs.Ui
 // panel; all send logic lives in Panel.qml.
 BarWidget {
   id: root
-  moduleName: "local.send-to-kindle"
+  moduleName: "io.github.simplici0.send-to-kindle"
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
 
@@ -56,7 +56,7 @@ BarWidget {
   }
 
   IpcHandler {
-    target: "local.send-to-kindle"
+    target: "io.github.simplici0.send-to-kindle"
 
     function open(): void { root.open() }
     function close(): void { root.close() }

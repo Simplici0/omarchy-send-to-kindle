@@ -6,7 +6,7 @@ gnome-keyring). The secret NEVER travels on argv or through QML.
 
 Usage (invoked by Panel.qml, not by hand):
     send_kindle.py --smtp-host H --smtp-port P --smtp-user U \
-        --from A --to B --file PATH [--no-tls] [--subject S]
+        --from A --to B --file PATH [--subject S]
     send_kindle.py --check-secret --smtp-user U --smtp-host H
     send_kindle.py --store-secret --smtp-user U --smtp-host H   # secret on stdin
 
@@ -59,8 +59,6 @@ def build_args(argv):
     parser.add_argument("--from", dest="from_addr", required=False, default="")
     parser.add_argument("--to", required=False, default="")
     parser.add_argument("--file", dest="file_path", required=False, default="")
-    parser.add_argument("--no-tls", action="store_true",
-                        help="Skip STARTTLS (local relay without TLS only)")
     parser.add_argument("--subject", default="convert")
     parser.add_argument("--check-secret", action="store_true",
                         help="Only verify the keyring secret exists (prints OK or MISSING, never the secret)")
@@ -150,12 +148,17 @@ def main(argv=None):
     except OSError as exc:
         return fail("unreadable", str(exc))
 
-    msg = EmailMessage()
-    msg["From"] = args.from_addr
-    msg["To"] = args.to
-    msg["Subject"] = args.subject
-    msg.set_content("Sent from the Omarchy Send to Kindle plugin.")
-    msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=path.name)
+    try:
+        msg = EmailMessage()
+        msg["From"] = args.from_addr
+        msg["To"] = args.to
+        msg["Subject"] = args.subject
+        msg.set_content("Sent from the Omarchy Send to Kindle plugin.")
+        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=path.name)
+    except ValueError:
+        # A line break in a user-set header or in the file name cannot be
+        # encoded as a mail header; report it instead of crashing.
+        return fail("bad-args", "invalid header or file name")
 
     # Verify the server certificate: smtplib's implicit context is
     # _create_unverified_context (CERT_NONE, no hostname check), which would
@@ -168,10 +171,13 @@ def main(argv=None):
                 smtp.send_message(msg)
         else:
             with smtplib.SMTP(args.smtp_host, args.smtp_port, timeout=30) as smtp:
-                if not args.no_tls:
-                    smtp.starttls(context=context)
+                smtp.starttls(context=context)
                 smtp.login(args.smtp_user, secret)
                 smtp.send_message(msg)
+    except UnicodeEncodeError:
+        # smtplib encodes AUTH credentials as ASCII; report the fix without
+        # echoing the user or the secret.
+        return fail("smtp-auth", "credentials must be ASCII; use an app password")
     except smtplib.SMTPAuthenticationError as exc:
         return fail("smtp-auth", str(exc).splitlines()[0] if str(exc) else "")
     except (smtplib.SMTPException, OSError) as exc:
@@ -183,4 +189,11 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as exc:
+        # Terminal safety net: Panel.qml only parses `OK` / `ERROR <code>`
+        # lines, so an unexpected exception must still honor that contract.
+        # Only the exception class name is printed, never values or messages.
+        print("ERROR internal " + exc.__class__.__name__, flush=True)
+        sys.exit(1)
